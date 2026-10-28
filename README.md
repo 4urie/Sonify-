@@ -1,12 +1,12 @@
 # Sonify
 
-An Android music streaming app built with Flutter. Sonify uses your existing Supabase project for a public, read-only music catalog and public audio/artwork storage. Your library stays on your device.
+An Android music streaming app built with Flutter. Sonify uses Supabase for a public, read-only music catalog and artwork, and Cloudflare R2 for public audio. Your library stays on your device.
 
 ## Connect Supabase
 
 1. In your project's **SQL Editor**, run `supabase/migrations/202610230001_catalog.sql` once. It creates `songs`, the `search_songs` function, and public `music` and `artwork` buckets. It intentionally fails rather than changing an existing table or bucket with those names. Inspect conflicting names before adapting the migration.
-2. In **Storage → music**, upload an MP3 you own or have permission to stream. Upload cover images to **Storage → artwork**. Project storage/upload/egress limits still apply. These buckets are public, so do not put private files in them.
-3. Add song rows in **Table Editor → songs**. Paths are object paths **inside** each bucket, not full URLs or device file paths. Paths and filename case must match exactly.
+2. Put audio you have permission to stream in your public R2 bucket. Upload cover images to Supabase **Storage → artwork**. Public bucket files are accessible to anyone with their URLs.
+3. Add song rows in **Table Editor → songs**. `audio_path` is the object path inside the R2 bucket, and `artwork_path` is the object path inside the Supabase artwork bucket. They are not full URLs or device file paths. Paths and filename case must match exactly. R2 files do not automatically create catalog rows.
 
 Example (replace with paths you uploaded):
 
@@ -18,7 +18,28 @@ values ('First Light', 'Your Artist', 'Morning Sessions',
 
 Artwork and duration may be null. The player reads actual duration when audio loads. Missing covers use a placeholder. No commercial music or fabricated catalog entries are bundled.
 
-4. Copy `config.example.json` to `config.json`. Fill in the project URL and **publishable** key from the dashboard. A legacy `anon` key also works as the value. Never use a `service_role`, secret, database password, or administrative key. `config.json` is ignored by Git, but client configuration remains visible inside a built app: security comes from RLS/storage policies.
+### Bulk import from R2
+
+The import tool lists audio objects in R2, downloads each temporarily to read its metadata, and creates a SQL file for review. It does not change the database itself. It skips existing song paths, preserving their metadata and artwork. Title falls back to the filename and artist to `Unknown Artist` when tags are missing. Downloading files uses bandwidth and R2 operations.
+
+1. In Cloudflare R2, find your **Account ID** and create an R2 API token scoped to `sonify-music` with object read/list access. Keep the access key and secret private; do not put them in the Flutter app or send them in chat.
+2. In PowerShell, install the import dependencies and set the credentials for this terminal session:
+
+```powershell
+python -m pip install -r scripts/requirements-import.txt
+$env:R2_ACCOUNT_ID = 'YOUR_ACCOUNT_ID'
+$env:AWS_ACCESS_KEY_ID = 'YOUR_R2_ACCESS_KEY_ID'
+$env:AWS_SECRET_ACCESS_KEY = 'YOUR_R2_SECRET_ACCESS_KEY'
+python scripts/import_r2.py --bucket sonify-music
+```
+
+3. Review `r2-songs-import.sql`, correct missing metadata if needed, then paste its contents into the Supabase SQL Editor and run it. Refresh Sonify's catalog. Run the catalog migration first if the `songs` table does not exist. To limit the import to a folder, add `--prefix 'folder/'`. The generated SQL file is ignored by Git.
+
+To extract embedded covers, use an R2 token with **Object Read & Write** access to the bucket, then run `python scripts/import_r2.py --bucket sonify-music --upload-covers`. The script uploads supported embedded JPEG, PNG and WebP covers to `sonify-artwork/` in the public R2 bucket, using content-based filenames. Run the generated SQL in Supabase: it fills missing artwork on existing songs without replacing existing artwork. Refresh and rebuild the app to display R2 covers. Files without a supported embedded cover keep their current artwork or placeholder.
+
+Close the terminal when finished to clear its environment variables. For a large bucket, allow time for the script to download the files one at a time.
+
+4. Copy `config.example.json` to `config.json`. Fill in the Supabase project URL and **publishable** key from the dashboard. The R2 audio URL defaults to the configured public development bucket; change `R2_AUDIO_BASE_URL` to your R2 custom domain for production. A legacy `anon` key also works as the value. Never use a `service_role`, secret, database password, or administrative key. `config.json` is ignored by Git, but client configuration remains visible inside a built app: security comes from RLS/storage policies.
 5. Connect an Android phone with USB debugging:
 
 ```powershell

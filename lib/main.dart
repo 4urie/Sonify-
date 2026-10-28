@@ -39,7 +39,14 @@ Future<void> main() async {
     store = await SqliteStore.open();
     final library = Library(store);
     await library.restore();
-    final catalog = SupabaseCatalog(Supabase.instance.client);
+    const audioBaseUrl = String.fromEnvironment(
+      'R2_AUDIO_BASE_URL',
+      defaultValue: 'https://pub-5fd8c445ba6d49db92d81fea14e3e2c9.r2.dev',
+    );
+    final catalog = SupabaseCatalog(
+      Supabase.instance.client,
+      audioBaseUrl: audioBaseUrl,
+    );
     handler = await AudioService.init<SonifyAudioHandler>(
       builder: () => SonifyAudioHandler(catalog, library),
       config: const AudioServiceConfig(

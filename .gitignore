@@ -33,6 +33,7 @@ migrate_working_dir/
 /build/
 /coverage/
 /config.json
+/r2-songs-import.sql
 
 # Symbolication related
 app.*.symbols

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -113,29 +114,26 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
     super.dispose();
   }
 
-  void start(int i) {
+  Future<void> start(int i, {bool shuffle = false}) async {
     final snapshot = List<Song>.of(controller.songs);
     final query = controller.query;
     var offset = snapshot.length;
     final catalog = ref.read(catalogProvider);
     final library = ref.read(libraryProvider);
-    ref
-        .read(audioProvider)
-        .start(
-          snapshot,
-          i,
-          more: controller.hasMore && !controller.offline
-              ? () async {
-                  final page = await catalog.fetch(
-                    offset: offset,
-                    query: query,
-                  );
-                  offset += page.length;
-                  await library.cache(page);
-                  return page;
-                }
-              : null,
-        );
+    final audio = ref.read(audioProvider);
+    if (shuffle) await audio.setShuffleMode(AudioServiceShuffleMode.all);
+    await audio.start(
+      snapshot,
+      i,
+      more: controller.hasMore && !controller.offline
+          ? () async {
+              final page = await catalog.fetch(offset: offset, query: query);
+              offset += page.length;
+              await library.cache(page);
+              return page;
+            }
+          : null,
+    );
   }
 
   @override
@@ -196,6 +194,27 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                   if (!widget.search) ...[
                     const SizedBox(height: 24),
                     const _RecentStrip(),
+                    if (controller.songs.any((song) => song.available)) ...[
+                      const SizedBox(height: 20),
+                      FilledButton.icon(
+                        onPressed: () {
+                          final indices = [
+                            for (var i = 0; i < controller.songs.length; i++)
+                              if (controller.songs[i].available) i,
+                          ];
+                          if (indices.isNotEmpty) {
+                            unawaited(
+                              start(
+                                indices[Random().nextInt(indices.length)],
+                                shuffle: true,
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.shuffle),
+                        label: const Text('Shuffle loaded songs'),
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 24),
                   Row(
@@ -237,7 +256,7 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                     : 'Your soundtrack starts here',
                 text: widget.search
                     ? 'Try another title or artist.'
-                    : 'Upload music and add songs in Supabase to fill your catalog.',
+                    : 'Add your R2 music paths to the Supabase songs catalog.',
               ),
             ),
           SliverList.builder(
@@ -402,7 +421,9 @@ class SongTile extends ConsumerWidget {
       ),
       subtitle: Text(
         effective.available
-            ? '${effective.artist} • ${effective.album}'
+            ? (effective.album.isEmpty
+                  ? effective.artist
+                  : '${effective.artist} • ${effective.album}')
             : '${effective.artist} • Unavailable',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
@@ -707,6 +728,29 @@ class CollectionScreen extends ConsumerWidget {
       ),
       body: Column(
         children: [
+          if (songs.any((song) => song.available))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    final indices = [
+                      for (var i = 0; i < songs.length; i++)
+                        if (songs[i].available) i,
+                    ];
+                    final audio = ref.read(audioProvider);
+                    await audio.setShuffleMode(AudioServiceShuffleMode.all);
+                    await audio.start(
+                      songs,
+                      indices[Random().nextInt(indices.length)],
+                    );
+                  },
+                  icon: const Icon(Icons.shuffle),
+                  label: const Text('Shuffle'),
+                ),
+              ),
+            ),
           Expanded(
             child: songs.isEmpty
                 ? const _Message(

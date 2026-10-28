@@ -13,8 +13,10 @@ abstract interface class CatalogRepository {
 }
 
 class SupabaseCatalog implements CatalogRepository {
-  SupabaseCatalog(this.client);
+  SupabaseCatalog(this.client, {String? audioBaseUrl})
+    : audioBaseUrl = audioBaseUrl == null ? null : Uri.parse(audioBaseUrl);
   final SupabaseClient client;
+  final Uri? audioBaseUrl;
   @override
   Future<List<Song>> fetch({int offset = 0, String query = ''}) async {
     // RPC parameters keep punctuation out of PostgREST filter syntax.
@@ -49,12 +51,39 @@ class SupabaseCatalog implements CatalogRepository {
   }
 
   @override
-  String audioUrl(Song song) =>
-      client.storage.from('music').getPublicUrl(song.audioPath);
+  String audioUrl(Song song) {
+    final base = audioBaseUrl;
+    if (base == null) {
+      return client.storage.from('music').getPublicUrl(song.audioPath);
+    }
+    return base
+        .replace(
+          pathSegments: [
+            ...base.pathSegments.where((segment) => segment.isNotEmpty),
+            ...song.audioPath.split('/'),
+          ],
+        )
+        .toString();
+  }
+
   @override
-  String? artworkUrl(Song song) => song.artworkPath == null
-      ? null
-      : client.storage.from('artwork').getPublicUrl(song.artworkPath!);
+  String? artworkUrl(Song song) {
+    final path = song.artworkPath;
+    if (path == null) return null;
+    if (path.startsWith('r2:')) {
+      final base = audioBaseUrl;
+      if (base == null) return null;
+      return base
+          .replace(
+            pathSegments: [
+              ...base.pathSegments.where((segment) => segment.isNotEmpty),
+              ...path.substring(3).split('/'),
+            ],
+          )
+          .toString();
+    }
+    return client.storage.from('artwork').getPublicUrl(path);
+  }
 }
 
 abstract interface class LocalStore {
