@@ -70,6 +70,12 @@ class SupabaseCatalog implements CatalogRepository {
   String? artworkUrl(Song song) {
     final path = song.artworkPath;
     if (path == null) return null;
+    final uri = Uri.tryParse(path);
+    if (uri != null &&
+        uri.scheme == 'https' &&
+        uri.host == 'coverartarchive.org') {
+      return path;
+    }
     if (path.startsWith('r2:')) {
       final base = audioBaseUrl;
       if (base == null) return null;

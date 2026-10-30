@@ -34,6 +34,8 @@ migrate_working_dir/
 /coverage/
 /config.json
 /r2-songs-import.sql
+/metadata-review.csv
+/metadata-update.sql
 
 # Symbolication related
 app.*.symbols

@@ -20,9 +20,9 @@ Artwork and duration may be null. The player reads actual duration when audio lo
 
 ### Bulk import from R2
 
-The import tool lists audio objects in R2, downloads each temporarily to read its metadata, and creates a SQL file for review. It does not change the database itself. It skips existing song paths, preserving their metadata and artwork. Title falls back to the filename and artist to `Unknown Artist` when tags are missing. Downloading files uses bandwidth and R2 operations.
+The import tool reads existing song paths from Supabase, then lists audio objects in R2. It skips existing paths before downloading, and downloads new files temporarily to read their metadata. It creates a SQL file for review and does not change the database itself. Title falls back to the filename and artist to `Unknown Artist` when tags are missing. Downloading files uses bandwidth and R2 operations.
 
-1. In Cloudflare R2, find your **Account ID** and create an R2 API token scoped to `sonify-music` with object read/list access. Keep the access key and secret private; do not put them in the Flutter app or send them in chat.
+1. Ensure `config.json` contains your Supabase project URL and publishable key as described below. Alternatively set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in the terminal. The public catalog must allow that key to read all songs. In Cloudflare R2, find your **Account ID** and create an R2 API token scoped to `sonify-music` with object read/list access. Keep the access key and secret private; do not put them in the Flutter app or send them in chat.
 2. In PowerShell, install the import dependencies and set the credentials for this terminal session:
 
 ```powershell
@@ -35,9 +35,15 @@ python scripts/import_r2.py --bucket sonify-music
 
 3. Review `r2-songs-import.sql`, correct missing metadata if needed, then paste its contents into the Supabase SQL Editor and run it. Refresh Sonify's catalog. Run the catalog migration first if the `songs` table does not exist. To limit the import to a folder, add `--prefix 'folder/'`. The generated SQL file is ignored by Git.
 
-To extract embedded covers, use an R2 token with **Object Read & Write** access to the bucket, then run `python scripts/import_r2.py --bucket sonify-music --upload-covers`. The script uploads supported embedded JPEG, PNG and WebP covers to `sonify-artwork/` in the public R2 bucket, using content-based filenames. Run the generated SQL in Supabase: it fills missing artwork on existing songs without replacing existing artwork. Refresh and rebuild the app to display R2 covers. Files without a supported embedded cover keep their current artwork or placeholder.
+To extract embedded covers for new songs, use an R2 token with **Object Read & Write** access to the bucket, then run `python scripts/import_r2.py --bucket sonify-music --upload-covers`. The script uploads supported embedded JPEG, PNG and WebP covers to `sonify-artwork/` in the public R2 bucket, using content-based filenames. To also download and inspect existing songs to fill missing covers, add `--reprocess-existing`. Run the generated SQL in Supabase: it fills missing artwork without replacing existing artwork. Files without a supported embedded cover keep their current artwork or placeholder.
 
 Close the terminal when finished to clear its environment variables. For a large bucket, allow time for the script to download the files one at a time.
+
+### Find missing artists and covers
+
+With Supabase configured in `config.json`, run `python scripts/find_metadata.py find`. The script sends song titles and known artists to MusicBrainz and writes possible matches to `metadata-review.csv`. Open it in a spreadsheet, check each suggested title, artist, and MusicBrainz link, and set `approve` to `yes` only for correct matches. Numeric titles cannot be identified by title and need manual research. Cover links may not exist for every release; open them to check before approving, or clear the cover URL. Cover Art Archive is a third-party service and artwork may be subject to rights or availability restrictions.
+
+Close the CSV, then run `python scripts/find_metadata.py sql`. Review `metadata-update.sql` and run it in the Supabase SQL Editor. Only missing artists and artwork are filled, and existing information is preserved. Rebuild Sonify to display Cover Art Archive images. The lookup does not identify recordings from their audio and may suggest the wrong version or artist.
 
 4. Copy `config.example.json` to `config.json`. Fill in the Supabase project URL and **publishable** key from the dashboard. The R2 audio URL defaults to the configured public development bucket; change `R2_AUDIO_BASE_URL` to your R2 custom domain for production. A legacy `anon` key also works as the value. Never use a `service_role`, secret, database password, or administrative key. `config.json` is ignored by Git, but client configuration remains visible inside a built app: security comes from RLS/storage policies.
 5. Connect an Android phone with USB debugging:
