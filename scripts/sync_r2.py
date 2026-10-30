@@ -80,7 +80,7 @@ def sync(client, bucket, url, secret):
                 print(f'Could not sync {key} during {stage}: {detail}', file=sys.stderr)
     print(f'Sync finished: {inserted} added, {skipped} already added concurrently, {failed} failed.')
     if failed:
-        raise RuntimeError('Some songs failed; they will be retried next run.')
+        print('Some songs failed; they will be retried next run.', file=sys.stderr)
 
 
 def main():
