@@ -48,13 +48,32 @@ class QueueEntry {
 }
 
 class LocalPlaylist {
-  LocalPlaylist(this.id, this.name, this.songIds);
+  LocalPlaylist(
+    this.id,
+    this.name,
+    this.songIds, {
+    this.description = '',
+    this.coverSongId,
+  });
   final String id;
   String name;
+  String description;
+  String? coverSongId;
   final List<String> songIds;
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'songs': songIds};
-  factory LocalPlaylist.fromJson(Map<String, dynamic> j) =>
-      LocalPlaylist(j['id'], j['name'], List<String>.from(j['songs']));
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'songs': songIds,
+    'description': description,
+    'coverSongId': coverSongId,
+  };
+  factory LocalPlaylist.fromJson(Map<String, dynamic> j) => LocalPlaylist(
+    j['id'],
+    j['name'],
+    List<String>.from(j['songs']),
+    description: j['description'] ?? '',
+    coverSongId: j['coverSongId'],
+  );
 }
 
 String encode(Object value) => jsonEncode(value);

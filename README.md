@@ -53,9 +53,13 @@ Close the terminal when finished to clear its environment variables. For a large
 
 ### Find missing artists and covers
 
+The title lookup understands filenames in `Title - Artist` and `Artist - Title` formats, including names with hyphens such as `Pa-umaga - Al James`. Try `python scripts/find_metadata.py find --limit 5 --csv metadata-review-check.csv` to test a few rows first. The review includes `lookup_status` and `lookup_note`: `suggested` needs review, `no_match` means the provider found no recording, `request_failed` describes a network/provider error, and `needs_fingerprint` means there was no usable title. Existing review files are backed up before regeneration. HTTP rate-limit and temporary server errors are retried.
+
 With Supabase configured in `config.json`, run `python scripts/find_metadata.py find`. The script sends song titles and known artists to MusicBrainz and writes possible matches to `metadata-review.csv`. Open it in a spreadsheet, check each suggested title, artist, and MusicBrainz link, and set `approve` to `yes` only for correct matches. Numeric titles cannot be identified by title and need manual research. Cover links may not exist for every release; open them to check before approving, or clear the cover URL. Cover Art Archive is a third-party service and artwork may be subject to rights or availability restrictions.
 
 Close the CSV, then run `python scripts/find_metadata.py sql`. Review `metadata-update.sql` and run it in the Supabase SQL Editor. Only missing artists and artwork are filled, and existing information is preserved. Rebuild Sonify to display Cover Art Archive images. The lookup does not identify recordings from their audio and may suggest the wrong version or artist.
+
+For recordings without reliable titles, install Chromaprint `fpcalc` and obtain an AcoustID application client key. Set `ACOUSTID_CLIENT_KEY` along with the R2 read credentials shown above, and run `python scripts/find_metadata.py fingerprint` (or provide `--fpcalc` with the executable path). This downloads songs missing an artist or cover and sends audio fingerprints and durations to AcoustID; it does not upload the audio itself. Run `python scripts/find_metadata.py review` to select suggested matches in the desktop review window, then run `python scripts/find_metadata.py sql` and review the generated SQL before applying it. Review the CSV's MusicBrainz and cover links too; fingerprint matches can be wrong or have no cover. The SQL only replaces a title when it still matches its filename. AcoustID's free service is for noncommercial use and subject to its usage limits. This workflow requires a desktop and is not an in-app review screen.
 
 4. Copy `config.example.json` to `config.json`. Fill in the Supabase project URL and **publishable** key from the dashboard. The R2 audio URL defaults to the configured public development bucket; change `R2_AUDIO_BASE_URL` to your R2 custom domain for production. A legacy `anon` key also works as the value. Never use a `service_role`, secret, database password, or administrative key. `config.json` is ignored by Git, but client configuration remains visible inside a built app: security comes from RLS/storage policies.
 5. Connect an Android phone with USB debugging:
@@ -76,6 +80,8 @@ Output: `build/app/outputs/flutter-apk/app-debug.apk`. Without configuration, th
 ## Using Sonify
 
 - **Home** lists the catalog and recent listening. Pull down to refresh; Load more fetches the next 50 songs.
+- Sort and artist/album filters load the full matching catalog before applying locally; large libraries may take longer to load. Library → Artists and Albums loads and groups the catalog.
+- Playlists can have a description and a cover selected from their songs. Open a playlist's menu to edit these or add multiple songs.
 - **Search** matches literal title/artist substrings after a 300 ms debounce. Results are paginated.
 - Tap a song to play its displayed collection. Catalog playback fetches additional pages near the end of the loaded queue.
 - Tap the persistent mini-player for Now Playing, seek, favorites, shuffle, repeat, and queue access.

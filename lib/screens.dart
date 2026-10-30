@@ -99,8 +99,16 @@ class CatalogScreen extends ConsumerStatefulWidget {
 class _CatalogScreenState extends ConsumerState<CatalogScreen> {
   late final CatalogController controller;
   String sort = 'recent';
+  String artistFilter = '', albumFilter = '';
+  bool loadingAll = false;
   List<Song> get displayedSongs {
-    final result = List<Song>.of(controller.songs);
+    final result = controller.songs
+        .where(
+          (s) =>
+              s.artist.toLowerCase().contains(artistFilter.toLowerCase()) &&
+              s.album.toLowerCase().contains(albumFilter.toLowerCase()),
+        )
+        .toList();
     if (sort == 'title') {
       result.sort(
         (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
@@ -111,6 +119,22 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
       );
     }
     return result;
+  }
+
+  Future<void> loadAll() async {
+    if (loadingAll) return;
+    setState(() => loadingAll = true);
+    while (controller.hasMore &&
+        !controller.offline &&
+        controller.error == null) {
+      if (controller.loading) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      } else {
+        await controller.more();
+      }
+      if (!mounted) return;
+    }
+    if (mounted) setState(() => loadingAll = false);
   }
 
   @override
@@ -132,7 +156,7 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
   Future<void> start(int i, {bool shuffle = false}) async {
     final snapshot = displayedSongs;
     final query = controller.query;
-    var offset = snapshot.length;
+    var offset = controller.songs.length;
     final catalog = ref.read(catalogProvider);
     final library = ref.read(libraryProvider);
     final audio = ref.read(audioProvider);
@@ -140,7 +164,12 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
     await audio.start(
       snapshot,
       i,
-      more: controller.hasMore && !controller.offline
+      more:
+          controller.hasMore &&
+              !controller.offline &&
+              artistFilter.isEmpty &&
+              albumFilter.isEmpty &&
+              sort == 'recent'
           ? () async {
               final page = await catalog.fetch(offset: offset, query: query);
               offset += page.length;
@@ -238,7 +267,10 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                       PopupMenuButton<String>(
                         tooltip: 'Sort loaded songs',
                         initialValue: sort,
-                        onSelected: (value) => setState(() => sort = value),
+                        onSelected: (value) async {
+                          if (value != 'recent') await loadAll();
+                          if (mounted) setState(() => sort = value);
+                        },
                         itemBuilder: (_) => const [
                           PopupMenuItem(
                             value: 'recent',
@@ -255,12 +287,80 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                         ],
                         icon: const Icon(Icons.sort),
                       ),
+                      IconButton(
+                        tooltip: 'Filter by artist or album',
+                        icon: const Icon(Icons.filter_list),
+                        onPressed: () async {
+                          final artist = TextEditingController(
+                            text: artistFilter,
+                          );
+                          final album = TextEditingController(
+                            text: albumFilter,
+                          );
+                          final apply = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Filter songs'),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextField(
+                                    controller: artist,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Artist contains',
+                                    ),
+                                  ),
+                                  TextField(
+                                    controller: album,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Album contains',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Apply'),
+                                ),
+                              ],
+                            ),
+                          );
+                          final a = artist.text.trim();
+                          final b = album.text.trim();
+                          await Future<void>.delayed(
+                            const Duration(milliseconds: 300),
+                          );
+                          artist.dispose();
+                          album.dispose();
+                          if (apply == true && mounted) {
+                            if (a.isNotEmpty || b.isNotEmpty) await loadAll();
+                            if (mounted) {
+                              setState(() {
+                                artistFilter = a;
+                                albumFilter = b;
+                              });
+                            }
+                          }
+                        },
+                      ),
                     ],
                   ),
-                  if (sort != 'recent')
-                    const Text(
-                      'Sorting loaded songs',
-                      style: TextStyle(color: Colors.grey),
+                  if (loadingAll) const Text('Loading full catalog…'),
+                  if (controller.hasMore &&
+                      (sort != 'recent' ||
+                          artistFilter.isNotEmpty ||
+                          albumFilter.isNotEmpty) &&
+                      !loadingAll)
+                    const Text('Results are incomplete. Retry loading more.'),
+                  if (artistFilter.isNotEmpty || albumFilter.isNotEmpty)
+                    Text(
+                      'Filters: $artistFilter ${albumFilter.isEmpty ? '' : '• $albumFilter'}',
                     ),
                   if (controller.error != null)
                     _Message(
@@ -287,6 +387,16 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                 text: widget.search
                     ? 'Try another title or artist.'
                     : 'Add your R2 music paths to the Supabase songs catalog.',
+              ),
+            ),
+          if (controller.songs.isNotEmpty &&
+              displayedSongs.isEmpty &&
+              !loadingAll)
+            const SliverToBoxAdapter(
+              child: _Message(
+                icon: Icons.filter_list,
+                title: 'No matching songs',
+                text: 'Change or clear your filters to see more music.',
               ),
             ),
           SliverList.builder(
@@ -661,6 +771,17 @@ class LibraryScreen extends ConsumerWidget {
             MaterialPageRoute(builder: (_) => const ArtistsScreen()),
           ),
         ),
+        ListTile(
+          leading: const Icon(Icons.album_outlined, color: Color(0xFF67E8A5)),
+          title: const Text('Albums'),
+          subtitle: const Text('Browse music by album'),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const ArtistsScreen(albums: true),
+            ),
+          ),
+        ),
         const Padding(
           padding: EdgeInsets.fromLTRB(24, 28, 24, 12),
           child: Text(
@@ -676,16 +797,24 @@ class LibraryScreen extends ConsumerWidget {
           ),
         for (final p in library.playlists)
           ListTile(
-            leading: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF273C30),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.queue_music),
-            ),
+            leading: library.songs[p.coverSongId] != null
+                ? Artwork(song: library.songs[p.coverSongId]!)
+                : Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF273C30),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.queue_music),
+                  ),
             title: Text(p.name),
-            subtitle: Text('${p.songIds.length} songs • On this device'),
+            subtitle: Text(
+              p.description.isEmpty
+                  ? '${p.songIds.length} songs • On this device'
+                  : '${p.songIds.length} songs • ${p.description}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => CollectionScreen(kind: p.id)),
@@ -697,7 +826,8 @@ class LibraryScreen extends ConsumerWidget {
 }
 
 class ArtistsScreen extends ConsumerStatefulWidget {
-  const ArtistsScreen({super.key});
+  const ArtistsScreen({super.key, this.albums = false});
+  final bool albums;
   @override
   ConsumerState<ArtistsScreen> createState() => _ArtistsScreenState();
 }
@@ -726,7 +856,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Artists')),
+    appBar: AppBar(title: Text(widget.albums ? 'Albums' : 'Artists')),
     body: Column(
       children: [
         Expanded(
@@ -747,9 +877,17 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
               final groups = <String, List<Song>>{};
               final names = <String, String>{};
               for (final song in snapshot.data ?? <Song>[]) {
-                final name = song.artist.trim();
-                final key = name.toLowerCase();
-                if (key.isEmpty || key == 'unknown artist') continue;
+                final name = widget.albums
+                    ? song.album.trim()
+                    : song.artist.trim();
+                final key = widget.albums
+                    ? '${name.toLowerCase()}\u0000${song.artist.trim().toLowerCase()}'
+                    : name.toLowerCase();
+                if (name.isEmpty ||
+                    (!widget.albums &&
+                        name.toLowerCase() == 'unknown artist')) {
+                  continue;
+                }
                 names.putIfAbsent(key, () => name);
                 groups.putIfAbsent(key, () => []).add(song);
               }
@@ -769,7 +907,9 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
                   return ListTile(
                     leading: Artwork(song: artistSongs.first),
                     title: Text(names[key]!),
-                    subtitle: Text('${artistSongs.length} songs'),
+                    subtitle: Text(
+                      '${artistSongs.length} songs${widget.albums ? ' • ${artistSongs.first.artist}' : ''}',
+                    ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(
                       context,
@@ -824,10 +964,19 @@ class ArtistSongsScreen extends ConsumerWidget {
                 );
               },
               icon: const Icon(Icons.shuffle),
-              label: const Text('Shuffle artist'),
+              label: const Text('Shuffle'),
             ),
           ),
         ),
+        if (songs.any((song) => song.available))
+          TextButton.icon(
+            onPressed: () {
+              final index = songs.indexWhere((song) => song.available);
+              ref.read(audioProvider).start(songs, index);
+            },
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('Play all'),
+          ),
         Expanded(
           child: ListView.builder(
             itemCount: songs.length,
@@ -840,6 +989,125 @@ class ArtistSongsScreen extends ConsumerWidget {
         const PlaybackError(),
         const MiniPlayer(),
       ],
+    ),
+  );
+}
+
+class AddPlaylistSongsScreen extends ConsumerStatefulWidget {
+  const AddPlaylistSongsScreen({super.key, required this.playlist});
+  final LocalPlaylist playlist;
+  @override
+  ConsumerState<AddPlaylistSongsScreen> createState() =>
+      _AddPlaylistSongsScreenState();
+}
+
+class _AddPlaylistSongsScreenState
+    extends ConsumerState<AddPlaylistSongsScreen> {
+  late final Future<List<Song>> songs;
+  final selected = <String>{};
+  String query = '';
+  @override
+  void initState() {
+    super.initState();
+    songs = load();
+  }
+
+  Future<List<Song>> load() async {
+    final catalog = ref.read(catalogProvider);
+    final result = <Song>[];
+    while (true) {
+      final page = await catalog.fetch(offset: result.length);
+      result.addAll(page);
+      if (page.length < 50) return result;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Add songs')),
+    body: FutureBuilder<List<Song>>(
+      future: songs,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return const Center(
+            child: Text(
+              'Could not load songs. Check your connection and try again.',
+            ),
+          );
+        }
+        final all = snapshot.data ?? <Song>[];
+        final shown = all
+            .where(
+              (s) => '${s.title} ${s.artist}'.toLowerCase().contains(
+                query.toLowerCase(),
+              ),
+            )
+            .toList();
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: TextField(
+                onChanged: (value) => setState(() => query = value),
+                decoration: const InputDecoration(
+                  labelText: 'Search songs',
+                  prefixIcon: Icon(Icons.search),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: shown.length,
+                itemBuilder: (context, i) {
+                  final song = shown[i];
+                  final already = widget.playlist.songIds.contains(song.id);
+                  return CheckboxListTile(
+                    value: already || selected.contains(song.id),
+                    onChanged: already
+                        ? null
+                        : (value) => setState(() {
+                            if (value == true) {
+                              selected.add(song.id);
+                            } else {
+                              selected.remove(song.id);
+                            }
+                          }),
+                    secondary: Artwork(song: song),
+                    title: Text(song.title),
+                    subtitle: Text(
+                      already ? 'Already in playlist' : song.artist,
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: FilledButton(
+                onPressed: selected.isEmpty
+                    ? null
+                    : () async {
+                        final library = ref.read(libraryProvider);
+                        for (final song in all.where(
+                          (s) => selected.contains(s.id),
+                        )) {
+                          library.songs[song.id] = song;
+                          if (!widget.playlist.songIds.contains(song.id)) {
+                            widget.playlist.songIds.add(song.id);
+                          }
+                        }
+                        await library.save();
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                child: Text('Add ${selected.length} songs'),
+              ),
+            ),
+          ],
+        );
+      },
     ),
   );
 }
@@ -879,6 +1147,47 @@ class CollectionScreen extends ConsumerWidget {
                     playlist.name = name;
                     await library.save();
                   }
+                } else if (action == 'details') {
+                  final description = await askName(
+                    context,
+                    initial: playlist.description,
+                    title: 'Playlist description',
+                  );
+                  if (description != null) {
+                    playlist.description = description;
+                    await library.save();
+                  }
+                } else if (action == 'cover') {
+                  final selected = await showModalBottomSheet<String>(
+                    context: context,
+                    builder: (context) => SafeArea(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          const ListTile(title: Text('Choose playlist cover')),
+                          for (final song in songs)
+                            ListTile(
+                              leading: Artwork(song: song),
+                              title: Text(song.title),
+                              subtitle: Text(song.artist),
+                              onTap: () => Navigator.pop(context, song.id),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                  if (selected != null) {
+                    playlist.coverSongId = selected;
+                    await library.save();
+                  }
+                } else if (action == 'add') {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          AddPlaylistSongsScreen(playlist: playlist),
+                    ),
+                  );
                 } else {
                   final confirmed = await showDialog<bool>(
                     context: context,
@@ -908,6 +1217,15 @@ class CollectionScreen extends ConsumerWidget {
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'rename', child: Text('Rename')),
+                PopupMenuItem(
+                  value: 'details',
+                  child: Text('Edit description'),
+                ),
+                PopupMenuItem(
+                  value: 'cover',
+                  child: Text('Choose cover from songs'),
+                ),
+                PopupMenuItem(value: 'add', child: Text('Add songs')),
                 PopupMenuItem(value: 'delete', child: Text('Delete playlist')),
               ],
             ),
@@ -915,6 +1233,14 @@ class CollectionScreen extends ConsumerWidget {
       ),
       body: Column(
         children: [
+          if (playlist != null && playlist.description.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(playlist.description),
+              ),
+            ),
           if (songs.any((song) => song.available))
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),

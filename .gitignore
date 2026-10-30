@@ -35,6 +35,8 @@ migrate_working_dir/
 /config.json
 /r2-songs-import.sql
 /metadata-review.csv
+/metadata-review*.csv
+/metadata-review*.csv.*.bak
 /metadata-update.sql
 
 # Symbolication related

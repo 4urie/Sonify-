@@ -12,6 +12,8 @@ void main() {
       await library.createPlaylist('Night drive');
       await library.cache([song('b')]);
       library.playlists.single.songIds.addAll(['b', 'a']);
+      library.playlists.single.description = 'Late night music';
+      library.playlists.single.coverSongId = 'b';
       for (var i = 0; i < 105; i++) {
         await library.played(song('$i'));
       }
@@ -21,6 +23,8 @@ void main() {
       await restored.restore();
       expect(restored.favorites, {'a'});
       expect(restored.playlists.single.songIds, ['b', 'a']);
+      expect(restored.playlists.single.description, 'Late night music');
+      expect(restored.playlists.single.coverSongId, 'b');
       expect(restored.recent.length, 100);
       expect(restored.recent.first, '10');
       expect(restored.recent.toSet().length, 100);
