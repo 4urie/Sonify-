@@ -31,9 +31,12 @@ def existing_audio_paths(url, key):
         params = {'select': 'id,audio_path', 'order': 'id.asc', 'limit': '500'}
         if last_id is not None:
             params['id'] = 'gt.' + last_id
+        headers = {'apikey': key, 'Accept': 'application/json'}
+        if not key.startswith('sb_secret_'):
+            headers['Authorization'] = 'Bearer ' + key
         request = Request(
             url.rstrip('/') + '/rest/v1/songs?' + urlencode(params),
-            headers={'apikey': key, 'Authorization': 'Bearer ' + key, 'Accept': 'application/json'},
+            headers=headers,
         )
         with urlopen(request, timeout=30) as response:
             rows = json.load(response)

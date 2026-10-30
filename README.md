@@ -18,7 +18,19 @@ values ('First Light', 'Your Artist', 'Morning Sessions',
 
 Artwork and duration may be null. The player reads actual duration when audio loads. Missing covers use a placeholder. No commercial music or fabricated catalog entries are bundled.
 
-### Bulk import from R2
+### Scheduled sync
+
+The GitHub Actions workflow `.github/workflows/sync-music.yml` checks R2 hourly and can also be run manually from GitHub Actions. It adds new songs to Supabase without changing or deleting existing songs. It reads embedded metadata and uploads embedded covers to R2; files are downloaded once when first imported. Songs without tags use their filenames and `Unknown Artist`. It does not identify untagged recordings. Existing song changes or deletions in R2 are not synchronized. Failed songs are retried on the next run.
+
+Setup:
+
+1. Run `supabase/migrations/202610300001_sync.sql` in the Supabase SQL Editor after the original catalog migration. It creates a sync-only function that is not executable by public app users.
+2. In your GitHub repository settings, open **Secrets and variables → Actions → New repository secret**. Add `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `SUPABASE_URL`, and `SUPABASE_SECRET_KEY`. Use an R2 token with Object Read & Write scoped to the music bucket for cover uploads. Create a Supabase secret key in the project's API keys settings. These are server credentials: never put them in `config.json`, the app, or a public issue.
+3. Commit and push the workflow, sync script, migration, and importer to the repository's default branch. In GitHub **Actions → Sync R2 music**, select **Run workflow** for the first run, and check the job log. After that, the schedule runs approximately hourly; GitHub can delay scheduled jobs. Refresh Sonify to see new songs. GitHub Actions must be enabled; schedules can be disabled after 60 days of inactivity in a public repository.
+
+The phone app has no admin login, so it cannot securely trigger the job itself. Manual sync is available from GitHub Actions instead. This job only imports objects present in your R2 bucket and never deletes catalog rows. The Supabase secret key has broad project access; restrict access to GitHub repository secrets and rotate it if exposed.
+
+### Manual bulk import from R2
 
 The import tool reads existing song paths from Supabase, then lists audio objects in R2. It skips existing paths before downloading, and downloads new files temporarily to read their metadata. It creates a SQL file for review and does not change the database itself. Title falls back to the filename and artist to `Unknown Artist` when tags are missing. Downloading files uses bandwidth and R2 operations.
 
