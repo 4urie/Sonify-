@@ -76,6 +76,32 @@ def release_rank(release):
             release.get('date') or '9999')
 
 
+def find_cover(releases):
+    """Return the first release with an available front image, not a guessed URL."""
+    seen = set()
+    for release in sorted(releases, key=release_rank):
+        release_id = release.get('id', '')
+        if not re.fullmatch(r'[0-9a-f-]{36}', release_id) or release_id in seen:
+            continue
+        seen.add(release_id)
+        url = 'https://coverartarchive.org/release/' + release_id + '/front-250'
+        request = Request(url, method='HEAD', headers={
+            'User-Agent': 'SonifyMetadataHelper/1.1 (https://github.com/4urie/Sonify-)'})
+        for attempt in range(3):
+            try:
+                with urlopen(request, timeout=30) as response:
+                    if response.headers.get('Content-Type', '').lower().startswith('image/'):
+                        return release, url
+                break
+            except HTTPError as exc:
+                if exc.code == 404:
+                    break
+                if exc.code not in (429, 502, 503, 504) or attempt == 2:
+                    raise
+                time.sleep(2 ** (attempt + 1))
+    return None, ''
+
+
 def catalog(url, key):
     last = None
     while True:
@@ -117,9 +143,9 @@ def find_match(title, artist):
     if record is None:
         return None
     credits = ''.join((c.get('name') or c.get('artist', {}).get('name', '')) + c.get('joinphrase', '') for c in record.get('artist-credit', []) if isinstance(c, dict))
-    release = min(record.get('releases') or [{}], key=release_rank)
-    release_id = release.get('id', '')
-    cover = 'https://coverartarchive.org/release/' + release_id + '/front-250' if re.fullmatch(r'[0-9a-f-]{36}', release_id) else ''
+    releases = record.get('releases') or []
+    release, cover = find_cover(releases)
+    release = release or min(releases or [{}], key=release_rank)
     return record.get('title', ''), credits, release.get('title', ''), cover, 'https://musicbrainz.org/recording/' + record.get('id', '')
 
 
@@ -139,9 +165,8 @@ def fingerprint_match(client, bucket, song, api_key, fpcalc):
     for match in result.get('results', []):
         for record in match.get('recordings', []):
             artist = ', '.join(a.get('name', '') for a in record.get('artists', []))
-            release = (record.get('releasegroups') or record.get('releases') or [{}])[0]
-            release_id = (record.get('releases') or [{}])[0].get('id', '')
-            cover = 'https://coverartarchive.org/release/' + release_id + '/front-250' if re.fullmatch(r'[0-9a-f-]{36}', release_id) else ''
+            release, cover = find_cover(record.get('releases') or [])
+            release = release or (record.get('releasegroups') or record.get('releases') or [{}])[0]
             return record.get('title', ''), artist, release.get('title', ''), cover, 'https://musicbrainz.org/recording/' + record.get('id', '')
     return None
 
@@ -228,7 +253,8 @@ def main():
                     try:
                         match = fingerprint_match(client, args.bucket, song, api_key, args.fpcalc) if client else find_match(title, artist)
                         status = 'suggested' if match else 'no_match'
-                        note = 'Review the recording and cover; the image URL may not exist.' if match else 'No matching recording found in the provider database.'
+                        note = ('Review the recording and cover; front image availability was verified.' if match[3]
+                                else 'Recording found, but no available front cover was found on its releases.') if match else 'No matching recording found in the provider database.'
                     except Exception as exc:
                         status = 'request_failed'
                         note = f'{type(exc).__name__}: {exc}'
