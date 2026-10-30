@@ -6,6 +6,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import boto3
@@ -41,10 +42,12 @@ def sync(client, bucket, url, secret):
             suffix = PurePosixPath(key).suffix.lower()
             if suffix not in EXTENSIONS or key in existing:
                 continue
+            stage = 'download audio from R2'
             try:
                 with tempfile.TemporaryDirectory(prefix='sonify-sync-') as directory:
                     local = Path(directory) / ('audio' + suffix)
                     client.download_file(bucket, key, str(local))
+                    stage = 'read audio metadata'
                     audio = audio_file(local, easy=True)
                     tags = audio.tags if audio else None
                     title = first(tags, 'title', PurePosixPath(key).stem)
@@ -55,11 +58,13 @@ def sync(client, bucket, url, secret):
                     cover = embedded_cover(local)
                     artwork = None
                     if cover:
+                        stage = 'upload embedded cover to R2'
                         data, mime = cover
                         ext = {'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp'}[mime]
                         cover_key = f'sonify-artwork/{hashlib.sha256(data).hexdigest()}.{ext}'
                         client.put_object(Bucket=bucket, Key=cover_key, Body=data, ContentType=mime)
                         artwork = 'r2:' + cover_key
+                    stage = 'insert song into Supabase'
                     created = insert_song(url, secret, {'p_title': title, 'p_artist': artist,
                         'p_album': album, 'p_audio_path': key, 'p_artwork_path': artwork,
                         'p_duration_ms': duration})
@@ -71,7 +76,8 @@ def sync(client, bucket, url, secret):
                     skipped += 1
             except Exception as exc:
                 failed += 1
-                print(f'Could not sync {key}: {type(exc).__name__}', file=sys.stderr)
+                detail = f'HTTP {exc.code}' if isinstance(exc, HTTPError) else type(exc).__name__
+                print(f'Could not sync {key} during {stage}: {detail}', file=sys.stderr)
     print(f'Sync finished: {inserted} added, {skipped} already added concurrently, {failed} failed.')
     if failed:
         raise RuntimeError('Some songs failed; they will be retried next run.')

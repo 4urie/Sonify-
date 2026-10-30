@@ -1,5 +1,8 @@
 ﻿import unittest
 from unittest.mock import MagicMock, patch
+import io
+from contextlib import redirect_stderr
+from urllib.error import HTTPError
 import sync_r2
 
 
@@ -21,6 +24,17 @@ class SyncTests(unittest.TestCase):
         with patch.object(sync_r2, 'existing_audio_paths', return_value=set()):
             with self.assertRaises(RuntimeError):
                 sync_r2.sync(client, 'bucket', 'https://example.supabase.co', 'secret')
+
+
+    def test_supabase_http_failure_reports_stage_and_status(self):
+        client = MagicMock()
+        client.get_paginator.return_value.paginate.return_value = [{'Contents': [{'Key': 'new.mp3'}]}]
+        error = HTTPError('https://example.supabase.co', 404, 'not found', {}, None)
+        stderr = io.StringIO()
+        with patch.object(sync_r2, 'existing_audio_paths', return_value=set()), patch.object(sync_r2, 'audio_file', return_value=None), patch.object(sync_r2, 'embedded_cover', return_value=None), patch.object(sync_r2, 'insert_song', side_effect=error), redirect_stderr(stderr):
+            with self.assertRaises(RuntimeError):
+                sync_r2.sync(client, 'bucket', 'https://example.supabase.co', 'secret')
+        self.assertIn('insert song into Supabase: HTTP 404', stderr.getvalue())
 
 
 if __name__ == '__main__':
