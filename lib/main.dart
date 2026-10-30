@@ -123,10 +123,11 @@ class SonifyApp extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
-                        Icons.graphic_eq_rounded,
-                        size: 72,
-                        color: Color(0xFF67E8A5),
+                      Image.asset(
+                        'assets/branding/icon.png',
+                        width: 96,
+                        height: 96,
+                        semanticLabel: 'Sonify',
                       ),
                       const SizedBox(height: 24),
                       Text(

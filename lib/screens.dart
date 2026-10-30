@@ -98,6 +98,21 @@ class CatalogScreen extends ConsumerStatefulWidget {
 
 class _CatalogScreenState extends ConsumerState<CatalogScreen> {
   late final CatalogController controller;
+  String sort = 'recent';
+  List<Song> get displayedSongs {
+    final result = List<Song>.of(controller.songs);
+    if (sort == 'title') {
+      result.sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      );
+    } else if (sort == 'artist') {
+      result.sort(
+        (a, b) => a.artist.toLowerCase().compareTo(b.artist.toLowerCase()),
+      );
+    }
+    return result;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -115,7 +130,7 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
   }
 
   Future<void> start(int i, {bool shuffle = false}) async {
-    final snapshot = List<Song>.of(controller.songs);
+    final snapshot = displayedSongs;
     final query = controller.query;
     var offset = snapshot.length;
     final catalog = ref.read(catalogProvider);
@@ -150,22 +165,12 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.graphic_eq_rounded,
-                        color: Color(0xFF67E8A5),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'SONIFY',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              letterSpacing: 4,
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                    ],
+                  Image.asset(
+                    'assets/branding/logo.png',
+                    width: 190,
+                    height: 67,
+                    fit: BoxFit.contain,
+                    semanticLabel: 'Sonify',
                   ),
                   const SizedBox(height: 28),
                   Text(
@@ -199,8 +204,8 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                       FilledButton.icon(
                         onPressed: () {
                           final indices = [
-                            for (var i = 0; i < controller.songs.length; i++)
-                              if (controller.songs[i].available) i,
+                            for (var i = 0; i < displayedSongs.length; i++)
+                              if (displayedSongs[i].available) i,
                           ];
                           if (indices.isNotEmpty) {
                             unawaited(
@@ -230,8 +235,33 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                         onPressed: controller.refresh,
                         icon: const Icon(Icons.refresh),
                       ),
+                      PopupMenuButton<String>(
+                        tooltip: 'Sort loaded songs',
+                        initialValue: sort,
+                        onSelected: (value) => setState(() => sort = value),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'recent',
+                            child: Text('Recently added'),
+                          ),
+                          PopupMenuItem(
+                            value: 'title',
+                            child: Text('Title A–Z'),
+                          ),
+                          PopupMenuItem(
+                            value: 'artist',
+                            child: Text('Artist A–Z'),
+                          ),
+                        ],
+                        icon: const Icon(Icons.sort),
+                      ),
                     ],
                   ),
+                  if (sort != 'recent')
+                    const Text(
+                      'Sorting loaded songs',
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   if (controller.error != null)
                     _Message(
                       icon: Icons.cloud_off,
@@ -260,9 +290,9 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
               ),
             ),
           SliverList.builder(
-            itemCount: controller.songs.length,
+            itemCount: displayedSongs.length,
             itemBuilder: (context, i) =>
-                SongTile(song: controller.songs[i], onPlay: () => start(i)),
+                SongTile(song: displayedSongs[i], onPlay: () => start(i)),
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -622,6 +652,15 @@ class LibraryScreen extends ConsumerWidget {
             ),
           ),
         ),
+        ListTile(
+          leading: const Icon(Icons.person_outline, color: Color(0xFF67E8A5)),
+          title: const Text('Artists'),
+          subtitle: const Text('Play songs by the same artist'),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ArtistsScreen()),
+          ),
+        ),
         const Padding(
           padding: EdgeInsets.fromLTRB(24, 28, 24, 12),
           child: Text(
@@ -655,6 +694,154 @@ class LibraryScreen extends ConsumerWidget {
       ],
     );
   }
+}
+
+class ArtistsScreen extends ConsumerStatefulWidget {
+  const ArtistsScreen({super.key});
+  @override
+  ConsumerState<ArtistsScreen> createState() => _ArtistsScreenState();
+}
+
+class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
+  late Future<List<Song>> songs;
+
+  @override
+  void initState() {
+    super.initState();
+    songs = load();
+  }
+
+  Future<List<Song>> load() async {
+    final result = <Song>[];
+    final catalog = ref.read(catalogProvider);
+    final library = ref.read(libraryProvider);
+    while (true) {
+      final page = await catalog.fetch(offset: result.length);
+      result.addAll(page);
+      if (page.length < 50) break;
+    }
+    await library.cache(result);
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Artists')),
+    body: Column(
+      children: [
+        Expanded(
+          child: FutureBuilder<List<Song>>(
+            future: songs,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return _Message(
+                  icon: Icons.cloud_off,
+                  title: 'Could not load artists',
+                  text: 'Check your connection and try again.',
+                  onRetry: () => setState(() => songs = load()),
+                );
+              }
+              final groups = <String, List<Song>>{};
+              final names = <String, String>{};
+              for (final song in snapshot.data ?? <Song>[]) {
+                final name = song.artist.trim();
+                final key = name.toLowerCase();
+                if (key.isEmpty || key == 'unknown artist') continue;
+                names.putIfAbsent(key, () => name);
+                groups.putIfAbsent(key, () => []).add(song);
+              }
+              final keys = groups.keys.toList()..sort();
+              if (keys.isEmpty) {
+                return const _Message(
+                  icon: Icons.person_outline,
+                  title: 'No artists yet',
+                  text: 'Add artist names to your songs to see them here.',
+                );
+              }
+              return ListView.builder(
+                itemCount: keys.length,
+                itemBuilder: (context, i) {
+                  final key = keys[i];
+                  final artistSongs = groups[key]!;
+                  return ListTile(
+                    leading: Artwork(song: artistSongs.first),
+                    title: Text(names[key]!),
+                    subtitle: Text('${artistSongs.length} songs'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ArtistSongsScreen(
+                          artist: names[key]!,
+                          songs: artistSongs,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        const PlaybackError(),
+        const MiniPlayer(),
+      ],
+    ),
+  );
+}
+
+class ArtistSongsScreen extends ConsumerWidget {
+  const ArtistSongsScreen({
+    super.key,
+    required this.artist,
+    required this.songs,
+  });
+  final String artist;
+  final List<Song> songs;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Scaffold(
+    appBar: AppBar(title: Text(artist)),
+    body: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: () async {
+                final available = songs
+                    .where((song) => song.available)
+                    .toList();
+                if (available.isEmpty) return;
+                final audio = ref.read(audioProvider);
+                await audio.setShuffleMode(AudioServiceShuffleMode.all);
+                await audio.start(
+                  available,
+                  Random().nextInt(available.length),
+                );
+              },
+              icon: const Icon(Icons.shuffle),
+              label: const Text('Shuffle artist'),
+            ),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: songs.length,
+            itemBuilder: (context, i) => SongTile(
+              song: songs[i],
+              onPlay: () => ref.read(audioProvider).start(songs, i),
+            ),
+          ),
+        ),
+        const PlaybackError(),
+        const MiniPlayer(),
+      ],
+    ),
+  );
 }
 
 class CollectionScreen extends ConsumerWidget {
