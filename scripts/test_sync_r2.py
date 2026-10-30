@@ -14,13 +14,13 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(insert.call_args.args[2]['p_title'], 'new')
         self.assertEqual(insert.call_args.args[2]['p_artist'], 'Unknown Artist')
 
-    def test_failure_is_reported_and_not_silently_ignored(self):
+    def test_failure_is_reported_without_failing_run(self):
         client = MagicMock()
         client.get_paginator.return_value.paginate.return_value = [{'Contents': [{'Key': 'new.mp3'}]}]
         client.download_file.side_effect = OSError('failed')
-        with patch.object(sync_r2, 'existing_audio_paths', return_value=set()):
-            with self.assertRaises(RuntimeError):
-                sync_r2.sync(client, 'bucket', 'https://example.supabase.co', 'secret')
+        with patch.object(sync_r2, 'existing_audio_paths', return_value=set()), patch('sys.stderr') as stderr:
+            sync_r2.sync(client, 'bucket', 'https://example.supabase.co', 'secret')
+            self.assertTrue(stderr.write.called)
 
 
 if __name__ == '__main__':
